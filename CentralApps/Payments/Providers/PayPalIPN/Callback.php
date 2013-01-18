@@ -16,6 +16,23 @@ class Callback extends AbstractCallback
     public function processCallback()
     {
         parse_str(file_get_contents('php://input'), $post_data);
+        
+        if ($this->validateCallback($post_data) === true) {
+            $orders = $this->orderFactory->getByTransactionReference($post_data['txn_id']);
+            if (count($orders) == 1) {
+                $order = $orders->pop();
+                if (($post_data['payment_status'] == 'Completed') && (floatval($order->getTotalCost()) === floatval($post_data['payment_amount']))) {
+                    $this->callback($order, 'paid');
+                    return;
+                }
+            }
+        }
+        
+        $this->callback($order, 'cancelled');
+    }
+    
+    private function validateCallback($post_data)
+    {
         $request = array(
             'cmd' => '_notify-validate'
         );
@@ -38,25 +55,12 @@ class Callback extends AbstractCallback
             CURLOPT_SSL_VERIFYHOST => 2,
             CURLOPT_SSL_VERIFYPEER => true,
         ));
-        
-        if (false === ($response = curl_exec($ch))) {
-            curl_close($ch);
-            exit;
-            // throw Exception?
-        }
+        $response = curl_exec($ch);
         curl_close($ch);
         
-        if (strcmp($response, 'VERIFIED') == 0) {
-            $orders = $this->orderFactory->getByTransactionReference($post_data['txn_id']);
-            if (count($orders) == 1) {
-                $order = $orders->pop();
-                if (($post_data['payment_status'] == 'Completed') && (floatval($order->getTotalCost()) === floatval($post_data['payment_amount']))) {
-                    $this->callback($order, 'paid');
-                    return;
-                }
-            }
+        if ($response === false) {
+            exit;
         }
-        
-        $this->callback($order, 'cancelled');
+        return (strcmp($response, 'VERIFIED') == 0);
     }
 }
